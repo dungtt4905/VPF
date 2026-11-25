@@ -2,7 +2,11 @@ import 'package:dio/dio.dart';
 import '../services/secure_storage_service.dart';
 
 class DioClient {
-  static const _baseUrl = 'http://127.0.0.1:3000';
+  // Địa chỉ server truyền lúc build: --dart-define=API_BASE_URL=https://<tên-service>.onrender.com
+  // Không truyền thì gọi server local (máy thật cần adb reverse tcp:3000 tcp:3000).
+  static const _baseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://127.0.0.1:3000');
+  // Server free có thể đang ngủ, request đầu tiên phải chờ nó khởi động lại.
+  static const _timeout = Duration(seconds: 90);
   static const _retriedKey = 'retried_after_refresh';
 
   final Dio dio;
@@ -12,8 +16,8 @@ class DioClient {
   final Dio _refreshDio = Dio(
     BaseOptions(
       baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: _timeout,
+      receiveTimeout: _timeout,
     ),
   );
 
@@ -22,10 +26,9 @@ class DioClient {
 
   DioClient(this._secureStorage) : dio = Dio(
     BaseOptions(
-      // Khi cắm máy thật dùng adb reverse tcp:3000 tcp:3000 thì gọi localhost hoặc 127.0.0.1
       baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: _timeout,
+      receiveTimeout: _timeout,
     ),
   ) {
     dio.interceptors.add(

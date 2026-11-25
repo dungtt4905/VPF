@@ -2,13 +2,14 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { requireJwtSecret } from './jwt-secrets';
 import { PrismaService } from '../prisma.service';
 
 @Module({
   imports: [
-    JwtModule.register({
+    JwtModule.registerAsync({
       global: true,
-      secret: process.env.JWT_SECRET || 'fallback-secret',
+      useFactory: () => ({ secret: requireJwtSecret('JWT_SECRET') }),
     }),
   ],
   controllers: [AuthController],

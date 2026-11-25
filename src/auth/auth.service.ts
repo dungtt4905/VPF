@@ -3,9 +3,12 @@ import { JwtService } from '@nestjs/jwt';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { PrismaService } from '../prisma.service';
 import * as bcrypt from 'bcrypt';
+import { requireJwtSecret } from './jwt-secrets';
 
 @Injectable()
 export class AuthService {
+  private readonly refreshSecret = requireJwtSecret('JWT_REFRESH_SECRET');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -58,7 +61,7 @@ export class AuthService {
     let payload: { sub: string };
     try {
       payload = await this.jwtService.verifyAsync<{ sub: string }>(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret',
+        secret: this.refreshSecret,
       });
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
@@ -101,7 +104,7 @@ export class AuthService {
       }),
       this.jwtService.signAsync(payload, {
         expiresIn: '7d',
-        secret: process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret',
+        secret: this.refreshSecret,
       }),
     ]);
 
