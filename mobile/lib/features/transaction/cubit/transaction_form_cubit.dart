@@ -15,6 +15,9 @@ class TransactionFormLoading extends TransactionFormState {}
 
 class TransactionFormSuccess extends TransactionFormState {}
 
+/// Tách riêng với [TransactionFormSuccess] để màn hình không báo "đã lưu" khi vừa xóa.
+class TransactionFormDeleted extends TransactionFormState {}
+
 class TransactionFormFailure extends TransactionFormState {
   final String error;
   TransactionFormFailure(this.error);
@@ -112,7 +115,7 @@ class TransactionFormCubit extends Cubit<TransactionFormState> {
     emit(TransactionFormLoading());
     try {
       await _transactionRepo.deleteTransaction(id);
-      emit(TransactionFormSuccess());
+      emit(TransactionFormDeleted());
     } catch (e) {
       emit(TransactionFormFailure(e.toString()));
     }

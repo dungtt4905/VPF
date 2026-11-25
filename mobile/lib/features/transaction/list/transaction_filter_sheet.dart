@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/category_model.dart';
 import '../../../models/enums.dart';
+import '../../category/category_style.dart';
 import 'transaction_filter.dart';
 import 'transaction_list_cubit.dart';
 
@@ -120,7 +121,8 @@ class _FilterSheetState extends State<_FilterSheet> {
         ),
       );
 
-  Widget _chip(String label, bool selected, VoidCallback onTap) => FilterChip(
+  Widget _chip(String label, bool selected, VoidCallback onTap, {Widget? avatar}) => FilterChip(
+        avatar: avatar,
         label: Text(label),
         selected: selected,
         onSelected: (_) => onTap(),
@@ -152,10 +154,88 @@ class _FilterSheetState extends State<_FilterSheet> {
         ),
       );
 
+  Widget _categoryChip(CategoryModel c, {bool isParent = false}) => _chip(
+        c.name,
+        _categoryIds.contains(c.syncId),
+        () => _toggle(_categoryIds, c.syncId),
+        avatar: isParent ? Icon(categoryIcon(c.icon), size: 18, color: categoryColor(c.color)) : null,
+      );
+
+  /// Mỗi danh mục cha một khối, danh mục con thụt vào bên dưới; danh mục không có con gom ở cuối.
+  Widget _categoryGroup(List<CategoryModel> cats) {
+    final byId = {for (final c in cats) c.syncId: c};
+    // Chỉ có hai cấp: danh mục mà cha không còn (hoặc cha lại là con) được coi như danh mục gốc để không bị mất.
+    bool isChild(CategoryModel c) {
+      final parent = byId[c.parentId];
+      return parent != null && !byId.containsKey(parent.parentId);
+    }
+
+    final childrenOf = <String, List<CategoryModel>>{};
+    for (final c in cats.where(isChild)) {
+      childrenOf.putIfAbsent(c.parentId!, () => []).add(c);
+    }
+    final roots = cats.where((c) => !isChild(c));
+    final parents = roots.where((c) => childrenOf.containsKey(c.syncId)).toList();
+    final singles = roots.where((c) => !childrenOf.containsKey(c.syncId)).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final p in parents)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _categoryChip(p, isParent: true),
+                Container(
+                  margin: const EdgeInsets.only(left: AppSpacing.md),
+                  padding: const EdgeInsets.only(left: AppSpacing.md),
+                  decoration: const BoxDecoration(
+                    border: Border(left: BorderSide(color: AppColors.border, width: 2)),
+                  ),
+                  child: Wrap(
+                    spacing: AppSpacing.sm,
+                    children: [for (final c in childrenOf[p.syncId]!) _categoryChip(c)],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (singles.isNotEmpty)
+          Wrap(spacing: AppSpacing.sm, children: [for (final c in singles) _categoryChip(c, isParent: true)]),
+      ],
+    );
+  }
+
+  Widget _categoryList(List<CategoryModel> cats) {
+    if (cats.isEmpty) return const Text('Chưa có danh mục', style: AppText.caption);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: AppSpacing.sm),
+          child: Text('Chọn danh mục cha sẽ gồm cả danh mục con', style: AppText.caption),
+        ),
+        for (final type in [TransactionType.expense, TransactionType.income])
+          if (cats.any((c) => c.type == type)) ...[
+            // Chỉ cần tiêu đề Chi/Thu khi đang hiện cả hai loại.
+            if (_type == null)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs, bottom: AppSpacing.xs),
+                child: Text(type == TransactionType.expense ? 'Khoản chi' : 'Khoản thu',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textMuted)),
+              ),
+            _categoryGroup(cats.where((c) => c.type == type).toList()),
+          ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cats = widget.categories.where((c) => _type == null || c.type == _type).toList()
-      ..sort((a, b) => a.type != b.type ? a.type.index.compareTo(b.type.index) : a.name.compareTo(b.name));
+      ..sort((a, b) => a.name.compareTo(b.name));
     final budgetDisabled = _type == TransactionType.income;
 
     return Padding(
@@ -187,14 +267,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                       _chip('Thu', _type == TransactionType.income, () => _setType(TransactionType.income)),
                     ]),
                   ),
-                  _section(
-                    'Danh mục',
-                    cats.isEmpty
-                        ? const Text('Chưa có danh mục', style: AppText.caption)
-                        : Wrap(spacing: AppSpacing.sm, children: [
-                            for (final c in cats) _chip(c.name, _categoryIds.contains(c.syncId), () => _toggle(_categoryIds, c.syncId)),
-                          ]),
-                  ),
+                  _section('Danh mục', _categoryList(cats)),
                   if (!budgetDisabled)
                     _section(
                       'Ngân sách (khoản chi)',

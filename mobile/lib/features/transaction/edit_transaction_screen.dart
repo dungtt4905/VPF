@@ -654,6 +654,11 @@ class _EditTransactionViewState extends State<_EditTransactionView> {
                   : const SnackBar(content: Text('Đã lưu giao dịch thành công'), backgroundColor: AppColors.primary),
             );
             Navigator.pop(context);
+          } else if (state is TransactionFormDeleted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Đã xóa giao dịch'), backgroundColor: AppColors.primary),
+            );
+            Navigator.pop(context);
           }
         },
         builder: (context, state) {
