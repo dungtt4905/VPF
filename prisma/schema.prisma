@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionType {
+  EXPENSE
+  INCOME
+}
+
+enum BudgetPeriod {
+  WEEKLY
+  MONTHLY
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+  PHONE
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  email        String?      @unique
+  phoneNumber  String?      @unique
+  passwordHash String?
+  authProvider AuthProvider @default(LOCAL)
+  name         String?
+  avatarUrl    String?
+  pinHash      String?
+
+  categories   Category[]
+  transactions Transaction[]
+  budgets      Budget[]
+  budgetPlans  BudgetPlan[]
+  budgetJars   BudgetJar[]
+  budgetLinks  BudgetCategory[]
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  @@map("users")
+}
+
+model Category {
+  id           String          @id @default(uuid()) @db.Uuid
+  userId       String?         @db.Uuid
+  parentId     String?         @db.Uuid
+  name         String
+  icon         String?
+  color        String?
+  type         TransactionType
+  isPredefined Boolean         @default(false)
+
+  user         User?           @relation(fields:[userId], references:[id], onDelete: Cascade)
+  parent       Category?       @relation("CategoryHierarchy", fields:[parentId], references:[id], onDelete: SetNull)
+  children     Category[]      @relation("CategoryHierarchy")
+
+  transactions Transaction[]
+  budgets      Budget[]
+  budgetLinks  BudgetCategory[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deletedAt    DateTime?
+
+  @@index([userId])
+  @@index([parentId])
+  @@map("categories")
+}
+
+model Transaction {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @db.Uuid
+  categoryId    String          @db.Uuid
+
+  title         String
+  amount        Decimal
+  type          TransactionType
+  paymentMethod String
+  note          String?
+
+  imageUrl      String?
+  imageKey      String?
+
+  transactionAt DateTime
+
+  user          User            @relation(fields:[userId], references:[id], onDelete: Cascade)
+  category      Category        @relation(fields:[categoryId], references:[id])
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
+
+  @@index([userId, transactionAt])
+  @@index([userId, categoryId])
+  @@index([updatedAt])
+  @@map("transactions")
+}
+
+model Budget {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  categoryId     String?      @db.Uuid
+
+  amount         Decimal
+  period         BudgetPeriod @default(MONTHLY)
+  startDate      DateTime
+  endDate        DateTime
+  alertThreshold Int          @default(80)
+  rollover       Boolean      @default(false)
+
+  user           User         @relation(fields:[userId], references:[id], onDelete: Cascade)
+  category       Category?    @relation(fields:[categoryId], references:[id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  @@index([userId, startDate, endDate])
+  @@map("budgets")
+}
+
+// Kế hoạch ngân sách của một kỳ (hiện là một tháng). Không ràng buộc unique (userId, periodStart) vì bản ghi
+// bị xóa mềm; client dùng id xác định theo (user, tháng) nên các thiết bị gộp về cùng một kế hoạch.
+model BudgetPlan {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  periodStart    DateTime
+  periodEnd      DateTime
+  expectedIncome Decimal  @default(0)
+
+  user           User     @relation(fields:[userId], references:[id], onDelete: Cascade)
+  jars           BudgetJar[]
+  links          BudgetCategory[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([userId, periodStart])
+  @@index([updatedAt])
+  @@map("budget_plans")
+}
+
+// Một hũ trong kế hoạch. jarKey nối các hũ "cùng một hũ" qua các kỳ (rollover, lịch sử).
+// name là snapshot lúc tạo kế hoạch, không đổi theo tên danh mục.
+model BudgetJar {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  planId         String   @db.Uuid
+  jarKey         String
+  name           String
+  amount         Decimal
+  alertThreshold Int      @default(80)
+  rollover       Boolean  @default(false)
+  isTotal        Boolean  @default(false)
+  paidAt         DateTime?
+
+  user           User     @relation(fields:[userId], references:[id], onDelete: Cascade)
+  plan           BudgetPlan @relation(fields:[planId], references:[id], onDelete: Cascade)
+  links          BudgetCategory[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([planId])
+  @@index([userId, jarKey])
+  @@index([updatedAt])
+  @@map("budget_jars")
+}
+
+// Liên kết hũ <-> danh mục. Trong một kế hoạch, một danh mục chỉ thuộc tối đa một hũ (client đảm bảo,
+// không dùng unique ở DB vì có bản ghi xóa mềm). categoryName là snapshot.
+// Không cascade từ Category (NoAction): xóa danh mục không được làm mất lịch sử của kế hoạch cũ.
+model BudgetCategory {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  planId       String   @db.Uuid
+  jarId        String   @db.Uuid
+  categoryId   String   @db.Uuid
+  categoryName String
+
+  user         User       @relation(fields:[userId], references:[id], onDelete: Cascade)
+  plan         BudgetPlan @relation(fields:[planId], references:[id], onDelete: Cascade)
+  jar          BudgetJar  @relation(fields:[jarId], references:[id], onDelete: Cascade)
+  category     Category   @relation(fields:[categoryId], references:[id], onDelete: NoAction)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  @@index([planId, categoryId])
+  @@index([jarId])
+  @@index([updatedAt])
+  @@map("budget_categories")
+}

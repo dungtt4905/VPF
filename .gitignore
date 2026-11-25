@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+/.alchemy
+/.prisma-composer
+
+# Compiled output next to TypeScript sources
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+
+# IDE, local tooling
+.idea/
+.agents/
+.claude/
+.cursor/
+.devin/
+
+# Separate third-party repository
+ponytail/
+mobile/android/build/
