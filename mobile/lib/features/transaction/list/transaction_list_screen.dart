@@ -46,6 +46,40 @@ class _View extends StatelessWidget {
     if (result != null) cubit.setFilter(result);
   }
 
+  Future<void> _confirmDelete(BuildContext context, int count) async {
+    final cubit = context.read<TransactionListCubit>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.card)),
+        title: Text('Xóa $count giao dịch?'),
+        content: Text('Bạn có chắc muốn xóa $count giao dịch đã chọn? Hành động này không thể hoàn tác.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Hủy', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.expense,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.chip)),
+            ),
+            child: const Text('Xóa', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await cubit.deleteSelected();
+      messenger.showSnackBar(SnackBar(content: Text('Đã xóa $count giao dịch')));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('Không xóa được giao dịch, vui lòng thử lại')));
+    }
+  }
+
   void _openEdit(BuildContext context, TransactionModel item) {
     showModalBottomSheet(
       context: context,
@@ -70,44 +104,115 @@ class _View extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: BlocBuilder<TransactionListCubit, TransactionListState>(
-          builder: (context, state) {
-            if (state is! TransactionListLoaded) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final d = state.data;
-            final cubit = context.read<TransactionListCubit>();
-            return Column(
-              children: [
-                _header(context, d),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-                  child: PeriodSelector(
-                    period: d.period,
-                    start: d.start,
-                    end: d.end,
-                    isCurrent: d.isCurrent,
-                    onPrevious: cubit.previous,
-                    onNext: cubit.next,
-                    onCurrent: cubit.goToCurrent,
-                    onPick: cubit.jumpTo,
-                  ),
-                ),
-                _activeFilters(context, d),
-                _summary(d),
-                Expanded(child: d.items.isEmpty ? _empty(context, d) : _list(context, d)),
-              ],
-            );
+    return BlocBuilder<TransactionListCubit, TransactionListState>(
+      builder: (context, state) {
+        final selecting = state is TransactionListLoaded && state.isSelecting;
+        // Đang chọn để xóa thì nút Back chỉ thoát chế độ chọn, chưa rời màn hình.
+        return PopScope(
+          canPop: !selecting,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) context.read<TransactionListCubit>().stopSelecting();
           },
+          child: Scaffold(
+            backgroundColor: AppColors.background,
+            body: SafeArea(
+              child: state is TransactionListLoaded
+                  ? _body(context, state)
+                  : const Center(child: CircularProgressIndicator()),
+            ),
+            bottomNavigationBar: state is TransactionListLoaded && state.isSelecting ? _deleteBar(context, state) : null,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _body(BuildContext context, TransactionListLoaded state) {
+    final d = state.data;
+    final cubit = context.read<TransactionListCubit>();
+    return Column(
+      children: [
+        _header(context, state),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+          child: PeriodSelector(
+            period: d.period,
+            start: d.start,
+            end: d.end,
+            isCurrent: d.isCurrent,
+            onPrevious: cubit.previous,
+            onNext: cubit.next,
+            onCurrent: cubit.goToCurrent,
+            onPick: cubit.jumpTo,
+          ),
+        ),
+        _activeFilters(context, d),
+        _summary(d),
+        if (state.isSelecting) _selectAll(context, state),
+        Expanded(child: d.items.isEmpty ? _empty(context, d) : _list(context, state)),
+      ],
+    );
+  }
+
+  Widget _selectAll(BuildContext context, TransactionListLoaded state) {
+    final cubit = context.read<TransactionListCubit>();
+    final enabled = state.data.items.isNotEmpty;
+    return Padding(
+      // Lề thêm 1px để ô này thẳng cột với checkbox trong thẻ (thẻ có viền 1px).
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page + 1),
+      child: InkWell(
+        onTap: enabled ? cubit.toggleSelectAll : null,
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+        child: Row(
+          children: [
+            Checkbox(
+              tristate: true,
+              value: state.isAllSelected ? true : (state.selected!.isEmpty ? false : null),
+              onChanged: enabled ? (_) => cubit.toggleSelectAll() : null,
+              activeColor: AppColors.primary,
+            ),
+            const Text('Chọn tất cả',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          ],
         ),
       ),
     );
   }
 
-  Widget _header(BuildContext context, TransactionListData d) {
+  Widget _deleteBar(BuildContext context, TransactionListLoaded state) {
+    final count = state.selected!.length;
+    return Material(
+      color: AppColors.surface,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page, vertical: AppSpacing.md),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: context.read<TransactionListCubit>().stopSelecting,
+                  child: const Text('Hủy'),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: count == 0 ? null : () => _confirmDelete(context, count),
+                  style: FilledButton.styleFrom(backgroundColor: AppColors.expense, foregroundColor: Colors.white),
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  label: Text('Xóa ($count)'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _header(BuildContext context, TransactionListLoaded state) {
+    final d = state.data;
     final cubit = context.read<TransactionListCubit>();
     Widget tab(String label, AnalyticsPeriod p) {
       final selected = d.period == p;
@@ -138,16 +243,25 @@ class _View extends StatelessWidget {
 
     final count = d.filter.activeCount;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.page, AppSpacing.md),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.md),
       child: Row(
         children: [
-          IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back)),
+          IconButton(
+            onPressed: () => Navigator.maybePop(context),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          // Màn hẹp thì tiêu đề tự thu nhỏ, không xuống dòng.
           const Expanded(
-            child: Text('Giao dịch',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text('Giao dịch',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            ),
           ),
           Container(
-            width: 120,
+            width: 112,
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(color: AppColors.primarySoft, borderRadius: BorderRadius.circular(AppRadius.card)),
             child: Row(children: [tab('Tuần', AnalyticsPeriod.week), tab('Tháng', AnalyticsPeriod.month)]),
@@ -163,6 +277,14 @@ class _View extends StatelessWidget {
               style: IconButton.styleFrom(backgroundColor: AppColors.primarySoft, foregroundColor: AppColors.primaryDark),
               icon: const Icon(Icons.filter_list_rounded),
             ),
+          ),
+          IconButton(
+            // Không có gì để xóa thì khóa nút; đang chọn thì luôn bấm được để thoát.
+            onPressed: state.isSelecting ? cubit.stopSelecting : (d.items.isEmpty ? null : cubit.startSelecting),
+            tooltip: state.isSelecting ? 'Hủy chọn' : 'Xóa',
+            visualDensity: VisualDensity.compact,
+            color: AppColors.expense,
+            icon: Icon(state.isSelecting ? Icons.close : Icons.delete_outline),
           ),
         ],
       ),
@@ -267,7 +389,8 @@ class _View extends StatelessWidget {
     );
   }
 
-  Widget _list(BuildContext context, TransactionListData d) {
+  Widget _list(BuildContext context, TransactionListLoaded state) {
+    final d = state.data;
     // Nhóm theo ngày (items đã sắp mới nhất trước nên thứ tự nhóm cũng vậy).
     final groups = <DateTime, List<TransactionModel>>{};
     for (final t in d.items) {
@@ -296,8 +419,8 @@ class _View extends StatelessWidget {
               child: Column(
                 children: [
                   for (var j = 0; j < items.length; j++) ...[
-                    if (j > 0) const Divider(height: 1, indent: 64, color: AppColors.border),
-                    _row(context, d, items[j]),
+                    if (j > 0) Divider(height: 1, indent: state.isSelecting ? 112 : 64, color: AppColors.border),
+                    if (state.isSelecting) _selectableRow(context, state, items[j]) else _row(context, d, items[j]),
                   ],
                 ],
               ),
@@ -338,6 +461,22 @@ class _View extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: radius),
       child: image ?? Icon(categoryIcon(cat?.icon), color: color, size: 20),
+    );
+  }
+
+  /// Chỉ checkbox mới chọn giao dịch; bấm vùng thông tin vẫn mở màn sửa để xem lại.
+  Widget _selectableRow(BuildContext context, TransactionListLoaded state, TransactionModel t) {
+    return Row(
+      key: ValueKey(t.id),
+      children: [
+        Checkbox(
+          value: state.selected!.contains(t.id),
+          onChanged: (_) => context.read<TransactionListCubit>().toggleSelected(t.id),
+          activeColor: AppColors.primary,
+          semanticLabel: 'Chọn ${t.title}',
+        ),
+        Expanded(child: _row(context, state.data, t)),
+      ],
     );
   }
 

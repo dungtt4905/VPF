@@ -87,16 +87,23 @@ class TransactionRepository {
 
   Future<TransactionModel?> getById(int id) => isar.transactionModels.get(id);
 
-  Future<void> deleteTransaction(int id) async {
-    final transaction = await isar.transactionModels.get(id);
-    if (transaction != null) {
+  Future<void> deleteTransaction(int id) => deleteTransactions([id]);
+
+  /// Xóa mềm nhiều giao dịch trong một lần ghi: hoặc xóa được hết, hoặc không xóa gì.
+  Future<void> deleteTransactions(Iterable<int> ids) async {
+    final idList = ids.toList();
+    await isar.writeTxn(() async {
       final now = DateTime.now().toUtc();
-      transaction.deletedAt = now;
-      transaction.updatedAt = now;
-      transaction.isSynced = false;
-      await isar.writeTxn(() async {
-        await isar.transactionModels.put(transaction);
-      });
-    }
+      final found = (await isar.transactionModels.getAll(idList))
+          .whereType<TransactionModel>()
+          .where((t) => t.deletedAt == null)
+          .toList();
+      for (final t in found) {
+        t.deletedAt = now;
+        t.updatedAt = now;
+        t.isSynced = false;
+      }
+      await isar.transactionModels.putAll(found);
+    });
   }
 }

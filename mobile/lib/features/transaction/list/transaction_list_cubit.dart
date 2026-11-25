@@ -53,7 +53,13 @@ class TransactionListLoading extends TransactionListState {}
 
 class TransactionListLoaded extends TransactionListState {
   final TransactionListData data;
-  TransactionListLoaded(this.data);
+
+  /// id các giao dịch đang được tick; null nghĩa là không ở chế độ chọn để xóa.
+  final Set<int>? selected;
+  TransactionListLoaded(this.data, {this.selected});
+
+  bool get isSelecting => selected != null;
+  bool get isAllSelected => data.items.isNotEmpty && selected?.length == data.items.length;
 }
 
 typedef _Selection = ({AnalyticsPeriod period, DateTime anchor});
@@ -80,7 +86,48 @@ class TransactionListCubit extends Cubit<TransactionListState> {
       _selection,
       _filter,
       _compute,
-    ).listen((d) => emit(TransactionListLoaded(d)));
+    ).listen(_onData);
+  }
+
+  /// Giao dịch bị ẩn (đổi bộ lọc, đổi kỳ, bị xóa...) sẽ tự bỏ tick: chỉ xóa được thứ đang nhìn thấy.
+  void _onData(TransactionListData d) {
+    final current = state;
+    final selected = current is TransactionListLoaded ? current.selected : null;
+    emit(TransactionListLoaded(d, selected: selected?.intersection({for (final t in d.items) t.id})));
+  }
+
+  // ---- Chọn nhiều để xóa ----
+
+  void startSelecting() => _select((_) => <int>{});
+
+  void stopSelecting() => _select((_) => null);
+
+  void toggleSelected(int id) => _select((current) {
+        final selected = current.selected;
+        if (selected == null) return null;
+        return selected.contains(id) ? selected.difference({id}) : {...selected, id};
+      });
+
+  /// Chọn tất cả giao dịch đang hiển thị, hoặc bỏ chọn hết nếu đã chọn đủ.
+  void toggleSelectAll() => _select((current) {
+        if (!current.isSelecting) return null;
+        return current.isAllSelected ? <int>{} : {for (final t in current.data.items) t.id};
+      });
+
+  Future<void> deleteSelected() async {
+    final current = state;
+    if (current is! TransactionListLoaded) return;
+    final ids = current.selected;
+    if (ids == null || ids.isEmpty) return;
+    await _txRepo.deleteTransactions(ids);
+    if (!isClosed) stopSelecting();
+  }
+
+  void _select(Set<int>? Function(TransactionListLoaded current) change) {
+    final current = state;
+    if (current is TransactionListLoaded) {
+      emit(TransactionListLoaded(current.data, selected: change(current)));
+    }
   }
 
   // ---- Kỳ (cùng logic với màn Phân tích) ----
